@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path="src"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="lib" path="Libs/jsoup-1.9.2.jar" sourcepath="C:/Users/sku202/Desktop/Current/Javadoc &amp; Sources/jsoup-1.9.2-sources.jar">
+		<attributes>
+			<attribute name="javadoc_location" value="jar:file:/C:/Users/sku202/Desktop/Current/Javadoc%20&amp;%20Sources/jsoup-1.9.2-javadoc.jar!/"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="Libs/commons-codec-1.9.jar"/>
+	<classpathentry kind="lib" path="Libs/commons-logging-1.2.jar"/>
+	<classpathentry kind="lib" path="Libs/fluent-hc-4.5.2.jar">
+		<attributes>
+			<attribute name="javadoc_location" value="https://hc.apache.org/httpcomponents-client-4.5.x/fluent-hc/apidocs"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="Libs/httpclient-4.5.2.jar">
+		<attributes>
+			<attribute name="javadoc_location" value="https://hc.apache.org/httpcomponents-client-4.5.x/httpclient/apidocs"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="Libs/httpclient-cache-4.5.2.jar">
+		<attributes>
+			<attribute name="javadoc_location" value="https://hc.apache.org/httpcomponents-client-4.5.x/httpclient-cache/apidocs"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="Libs/httpcore-4.4.4.jar"/>
+	<classpathentry kind="lib" path="Libs/httpmime-4.5.2.jar">
+		<attributes>
+			<attribute name="javadoc_location" value="https://hc.apache.org/httpcomponents-client-4.5.x/httpmime/apidocs"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="Libs/commons-io-2.5.jar">
+		<attributes>
+			<attribute name="javadoc_location" value="https://commons.apache.org/proper/commons-io/javadocs/api-2.5"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="output" path="bin"/>
+</classpath>
