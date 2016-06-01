@@ -30,6 +30,7 @@ import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.HttpClient;
+import org.apache.http.client.config.CookieSpecs;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.protocol.HttpClientContext;
@@ -52,7 +53,7 @@ import org.apache.http.ssl.SSLContextBuilder;
  * @author JARVIS
  */
 public final class SpiderConfig {
-	public final List<Long> hashCodes;
+	public final List<Integer> hashCodes;
 	public final List<WebURL> links;
 	private int socketTimeout = 20000;
 	private int connectionTimeout = 30000;
@@ -79,7 +80,7 @@ public final class SpiderConfig {
 	 */
 
 	public SpiderConfig(String url) {
-		hashCodes=new CopyOnWriteArrayList<>();
+		hashCodes = new CopyOnWriteArrayList<>();
 		url = URLCanonicalizer.getCanonicalURL(url);
 		modifiedSiteName = url;
 		createHttpClient();
@@ -91,12 +92,16 @@ public final class SpiderConfig {
 		links = new CopyOnWriteArrayList<WebURL>();
 		modifiedSiteName = handleRedirect(url);
 		this.setSiteName(modifiedSiteName);
-		links.add(new WebURL(url, httpclient));
-		WebURL redirectLocation = new WebURL(modifiedSiteName, httpclient);
-		if (!links.contains(redirectLocation)) {
-			links.add(0, redirectLocation);
+		WebURL redirectLocation = new WebURL(modifiedSiteName, httpclient,getHostName());
+		if (!hashCodes.contains(redirectLocation.hashCode())) {
+			links.add(redirectLocation);
+			hashCodes.add(redirectLocation.hashCode());
 		}
-
+		redirectLocation = new WebURL(url, httpclient,getHostName());
+		if (!hashCodes.contains(redirectLocation.hashCode())) {
+			links.add(redirectLocation);
+			hashCodes.add(redirectLocation.hashCode());
+		}
 	}
 
 	private void createHttpClient() {
@@ -111,7 +116,8 @@ public final class SpiderConfig {
 				}
 			}).build();
 			builder.setSSLContext(sslContext);
-			HostnameVerifier hostnameVerifier = SSLConnectionSocketFactory.getDefaultHostnameVerifier();
+			@SuppressWarnings("deprecation")
+			HostnameVerifier hostnameVerifier = SSLConnectionSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER;
 
 			SSLConnectionSocketFactory sslSocketFactory = new SSLConnectionSocketFactory(sslContext, hostnameVerifier);
 			Registry<ConnectionSocketFactory> socketFactoryRegistry = RegistryBuilder.<ConnectionSocketFactory> create()
@@ -358,13 +364,13 @@ public final class SpiderConfig {
 	 * @param config
 	 * @throws java.lang.Exception
 	 */
-	public <T extends WebSpider> void start(final Object object, final SpiderConfig config) throws Exception {
+	public <T extends WebSpider> void start(final Object object) throws Exception {
 		validateConfig();
 		latch = new CountDownLatch(getTotalSpiders());
 		executor = Executors.newFixedThreadPool(getTotalSpiders());
 		for (int i = 0; i < getTotalSpiders(); i++) {
 			WebSpider spider = (WebSpider) object;
-			spider.setValues(config, latch);
+			spider.setValues(this, latch);
 			executor.execute(spider);
 		}
 		try {
@@ -374,6 +380,7 @@ public final class SpiderConfig {
 		} finally {
 			executor.shutdown();
 			executor.awaitTermination(5, TimeUnit.SECONDS);
+
 		}
 	}
 
@@ -433,8 +440,10 @@ public final class SpiderConfig {
 	// .setConnectionRequestTimeout(getConnectionRequestTimeout()).setSocketTimeout(getSocketTimeout())
 	// .setConnectTimeout(getConnectionTimeout()).build();
 	// }
+	@SuppressWarnings("deprecation")
 	private RequestConfig getRequestConfigWithRedirectDisabled() {
 		return RequestConfig.custom().setRedirectsEnabled(false)
+				.setCookieSpec(CookieSpecs.BROWSER_COMPATIBILITY)
 				.setConnectionRequestTimeout(getConnectionRequestTimeout()).setSocketTimeout(getSocketTimeout())
 				.setConnectTimeout(getConnectionTimeout()).build();
 	}

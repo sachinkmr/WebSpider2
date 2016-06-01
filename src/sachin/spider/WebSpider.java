@@ -5,26 +5,52 @@
  */
 package sachin.spider;
 
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.ObjectInputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
+
 import org.apache.commons.io.IOUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.HttpClient;
+import org.apache.http.client.config.CookieSpecs;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.client.utils.HttpClientUtils;
 import org.apache.http.client.utils.URIUtils;
+import org.apache.http.config.Registry;
+import org.apache.http.config.RegistryBuilder;
+import org.apache.http.conn.socket.ConnectionSocketFactory;
+import org.apache.http.conn.socket.PlainConnectionSocketFactory;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.conn.ssl.TrustStrategy;
 import org.apache.http.impl.EnglishReasonPhraseCatalog;
+import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
+import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.util.EntityUtils;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -36,10 +62,10 @@ import org.jsoup.nodes.Document;
 public class WebSpider implements Runnable {
 
 	private CountDownLatch latch;
-	private int trackers = 0;
 	private HttpClient httpclient = null;
 	private SpiderConfig config;
 	private static boolean flag2 = true;
+	private PoolingHttpClientConnectionManager cm;
 
 	/**
 	 *
@@ -49,7 +75,49 @@ public class WebSpider implements Runnable {
 	public void setValues(SpiderConfig config, CountDownLatch latch) {
 		this.config = config;
 		this.latch = latch;
-		httpclient = config.getHttpclient();
+		createHttpClient();
+	}
+
+	private void createHttpClient() {
+		try {
+			HttpClientBuilder builder = HttpClientBuilder.create();
+			builder.setUserAgent(config.getUserAgentString());
+			SSLContext sslContext = new SSLContextBuilder().loadTrustMaterial(null, new TrustStrategy() {
+				@Override
+				public boolean isTrusted(java.security.cert.X509Certificate[] xcs, String string)
+						throws java.security.cert.CertificateException {
+					return true;
+				}
+			}).build();
+			builder.setSSLContext(sslContext);
+			@SuppressWarnings("deprecation")
+			HostnameVerifier hostnameVerifier = SSLConnectionSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER;
+
+			SSLConnectionSocketFactory sslSocketFactory = new SSLConnectionSocketFactory(sslContext, hostnameVerifier);
+			Registry<ConnectionSocketFactory> socketFactoryRegistry = RegistryBuilder.<ConnectionSocketFactory> create()
+					.register("http", PlainConnectionSocketFactory.getSocketFactory())
+					.register("https", sslSocketFactory).build();
+			cm = new PoolingHttpClientConnectionManager(socketFactoryRegistry);
+			cm.setDefaultMaxPerRoute(config.getTotalSpiders() * 2);
+			cm.setMaxTotal(config.getTotalSpiders() * 2);
+
+			RequestConfig requestConfig = getRequestConfigWithRedirectDisabled();
+
+			if (config.isAuthenticate()) {
+				CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+				credentialsProvider.setCredentials(AuthScope.ANY,
+						new UsernamePasswordCredentials(config.getUsername(), config.getPassword()));
+				httpclient = HttpClients.custom().setDefaultRequestConfig(requestConfig)
+						.setUserAgent(config.getUserAgentString()).setDefaultCredentialsProvider(credentialsProvider)
+						.setConnectionManager(cm).build();
+
+			} else {
+				httpclient = HttpClients.custom().setConnectionManager(cm).setUserAgent(config.getUserAgentString())
+						.setDefaultRequestConfig(requestConfig).build();
+			}
+		} catch (NoSuchAlgorithmException | KeyStoreException | KeyManagementException ex) {
+			Logger.getLogger(SpiderConfig.class.getName()).log(Level.SEVERE, null, ex);
+		}
 	}
 
 	/**
@@ -112,7 +180,7 @@ public class WebSpider implements Runnable {
 	 */
 	protected boolean shouldVisit(String url) {
 		// By default allow all urls to be crawled.
-		return true;
+		return !url.contains("#");
 	}
 
 	/**
@@ -137,32 +205,23 @@ public class WebSpider implements Runnable {
 			WebURL curUrl = null;
 			synchronized (this) {
 				if (flag2) {
-					curUrl = config.links.get(0);
+					curUrl = config.links.remove(0);
 					if (!curUrl.isProccessed()) {
 						processURL(curUrl);
 					}
-					updateTracker();
 					flag2 = false;
 				}
 			}
-			while (flag) {
-				int track = getTracker();
-				if (track < config.links.size()) {
-					curUrl = config.links.get(track);
-					if (!curUrl.isProccessed()) {
-						processURL(curUrl);
-					}
-					updateTracker();
-				} else {
-					Thread.sleep(2000);
-					if (track < config.links.size()) {
 
-					} else {
-						flag = false;
-					}
+			while (flag) {
+				curUrl = config.links.remove(0);
+				if (null != curUrl && !curUrl.isProccessed()) {
+					processURL(curUrl);
+				}
+				if (config.links.isEmpty()) {
+					flag = false;
 				}
 			}
-
 			if (latch.getCount() == 1) {
 				onBeforeExit();
 			}
@@ -175,27 +234,25 @@ public class WebSpider implements Runnable {
 	}
 
 	private void processURL(WebURL curUrl) {
-		handleLink(curUrl, curUrl.getResponse(), curUrl.getStatusCode(),
-				EnglishReasonPhraseCatalog.INSTANCE.getReason(curUrl.getStatusCode(), Locale.ENGLISH));
 		if (curUrl.getStatusCode() >= 300 && curUrl.getStatusCode() < 400) {
 			handleRedirectedLink(curUrl);
-		} else if (curUrl.getStatusCode() == 200 && curUrl.getMimeType().toLowerCase().contains("/html")) {
+		} else if (curUrl.getStatusCode() == 200 && curUrl.getMimeType().toLowerCase().contains("/htm")) {
 			try {
 				processPage(curUrl);
 			} catch (Exception ex) {
-				Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE, null, ex);
+				Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE, null, ex + curUrl.getUrl());
 			}
-		} else {
-			EntityUtils.consumeQuietly(curUrl.getResponse().getEntity());
-			HttpClientUtils.closeQuietly(curUrl.getResponse());
 		}
 		curUrl.setProccessed(true);
+		handleLink(curUrl, curUrl.getResponse(), curUrl.getStatusCode(),
+				EnglishReasonPhraseCatalog.INSTANCE.getReason(curUrl.getStatusCode(), Locale.ENGLISH));
+		// EntityUtils.consumeQuietly(curUrl.getResponse().getEntity());
+		// HttpClientUtils.closeQuietly(curUrl.getResponse());
 	}
 
 	private void processPage(WebURL curUrl) {
-		HttpResponse response = curUrl.getResponse();
 		long startingTime = System.currentTimeMillis();
-		Document doc = Jsoup.parse(getContentAsString(response), curUrl.getBaseHref());
+		Document doc = Jsoup.parse(getContentAsString(curUrl), curUrl.getBaseHref());
 		long endingTime = System.currentTimeMillis();
 		Page page = new Page(curUrl, doc);
 		page.setHeaders(curUrl.getHeaders());
@@ -209,11 +266,12 @@ public class WebSpider implements Runnable {
 			if (null != linkUrl) {
 				linkUrl = URLCanonicalizer.getCanonicalURL(linkUrl);
 				linkUrl = handleUrlBeforeProcess(linkUrl);
-				WebURL weburl = new WebURL(linkUrl, httpclient);
+				WebURL weburl = new WebURL(linkUrl, httpclient, config.getHostName());
 				weburl.addParent(curUrl);
 				if (shouldVisit(linkUrl)) {
-					if (!config.links.contains(weburl) && !linkUrl.contains("#") && !linkUrl.contains("mailto:")) {
+					if (!config.hashCodes.contains(weburl.hashCode()) && !linkUrl.contains("mailto:")) {
 						config.links.add(weburl);
+						config.hashCodes.add(weburl.hashCode());
 					}
 				}
 			}
@@ -237,20 +295,22 @@ public class WebSpider implements Runnable {
 			curUrl.setRedirectTo(redirectUrl);
 
 			redirectUrl = URLCanonicalizer.getCanonicalURL(redirectUrl);
-			WebURL weburl = new WebURL(redirectUrl, httpclient);
+			WebURL weburl = new WebURL(redirectUrl, httpclient, config.getHostName());
 			weburl.addParent(curUrl);
-			if (!config.links.contains(weburl)) {
+			if (!config.hashCodes.contains(weburl.hashCode())) {
 				config.links.add(weburl);
+				config.hashCodes.add(weburl.hashCode());
 			}
 			try {
 				if (redirectLocations != null) {
 					WebURL par = curUrl;
 					for (URI s : redirectLocations) {
 						String urls = URLCanonicalizer.getCanonicalURL(s.toString());
-						WebURL url1 = new WebURL(urls, httpclient);
-						if (!config.links.contains(url1)) {
+						WebURL url1 = new WebURL(urls, httpclient, config.getHostName());
+						if (!config.hashCodes.contains(url1.hashCode())) {
 							url1.addParent(par);
 							config.links.add(url1);
+							config.hashCodes.add(url1.hashCode());
 						}
 						par = url1;
 					}
@@ -262,11 +322,9 @@ public class WebSpider implements Runnable {
 			HttpClientUtils.closeQuietly(response);
 		} catch (IOException | URISyntaxException ex) {
 			System.out.println(curUrl.getUrl());
-			curUrl.setErrorMsg(ex.toString());
 			Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE, null, ex);
 		} catch (Exception ex) {
 			System.out.println(curUrl.getUrl());
-			curUrl.setErrorMsg(ex.toString());
 			Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE, null, ex);
 		} finally {
 			httpget.releaseConnection();
@@ -274,18 +332,11 @@ public class WebSpider implements Runnable {
 
 	}
 
+	@SuppressWarnings("deprecation")
 	private RequestConfig getRequestConfigWithRedirectDisabled() {
-		return RequestConfig.custom().setRedirectsEnabled(false)
+		return RequestConfig.custom().setCookieSpec(CookieSpecs.BROWSER_COMPATIBILITY).setRedirectsEnabled(false)
 				.setConnectionRequestTimeout(config.getConnectionRequestTimeout())
 				.setSocketTimeout(config.getSocketTimeout()).setConnectTimeout(config.getConnectionTimeout()).build();
-	}
-
-	private synchronized int getTracker() {
-		return trackers;
-	}
-
-	private synchronized void updateTracker() {
-		trackers++;
 	}
 
 	private void verifyUnProcessedUrls() {
@@ -296,13 +347,19 @@ public class WebSpider implements Runnable {
 		}
 	}
 
-	private String getContentAsString(HttpResponse response) {
+	private String getContentAsString(WebURL url) {
 		String str = null;
 		try {
-			HttpEntity entity = response.getEntity();
+			ObjectInputStream st = new ObjectInputStream(new FileInputStream(
+					new File(System.getProperty("user.dir") + File.separator + "data" + File.separator + url.getHost(),
+							url.getUrl().hashCode() + ".webUrl")));
+			HttpEntity entity = (HttpEntity) st.readObject();
+			st.close();
 			str = IOUtils.toString(entity.getContent(), "UTF-8");
-		} catch (IOException ex) {
+			EntityUtils.consumeQuietly(entity);
+		} catch (Exception ex) {
 			Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE, null, ex);
+
 		}
 		return str;
 	}

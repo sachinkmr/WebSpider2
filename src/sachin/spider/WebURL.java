@@ -1,6 +1,10 @@
 package sachin.spider;
 
-import java.io.IOException;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.ObjectOutputStream;
+import java.io.OutputStream;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Objects;
@@ -11,14 +15,12 @@ import java.util.logging.Logger;
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
-import org.apache.http.ParseException;
 import org.apache.http.StatusLine;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.entity.ContentType;
 import org.apache.http.impl.EnglishReasonPhraseCatalog;
-import org.apache.http.util.EntityUtils;
 
 /**
  *
@@ -33,22 +35,25 @@ public class WebURL {
 	private String redirectTo = "";
 	private Header[] headers;
 	private String baseHref;
-	private String errorMsg;
 	private Set<WebURL> parents;
 	private int depth = 0;
 	private long size;
 	private String mimeType;
 	private HttpResponse response;
 	private ContentType contentType;
+	private String host;
 
 	public HttpResponse getResponse() {
 		return response;
 	}
 
+	public String getHost() {
+		return host;
+	}
 
-
-	public WebURL(String url, HttpClient httpclient) {
+	public WebURL(String url, HttpClient httpclient, String host) {
 		this.url = url;
+		this.host = host;
 		this.proccessed = false;
 		this.parents = new HashSet<>();
 		HttpGet httpget = new HttpGet(url);
@@ -61,27 +66,23 @@ public class WebURL {
 			statusCode = statusLine.getStatusCode();
 			statusMessage = EnglishReasonPhraseCatalog.INSTANCE.getReason(statusCode, Locale.ENGLISH);
 			resposneTime = ((int) (endingTime - startingTime)) / 1000;
-			HttpEntity entity = response.getEntity();
-			headers = response.getAllHeaders();
 			baseHref = context.getTargetHost().toString();
-//			String st=EntityUtils.toString(entity, "UTF-8");
+			headers = response.getAllHeaders();
+			HttpEntity entity = response.getEntity();
+			File file = new File(System.getProperty("user.dir") + File.separator + "data" + File.separator + host);
+			file.mkdirs();
+			ObjectOutputStream os = new ObjectOutputStream(new FileOutputStream(file));
+			entity.writeTo(os);
+			os.close();
 			if (statusCode <= 200) {
 				size = entity.getContentLength();
 				contentType = ContentType.get(entity);
 				mimeType = contentType.getMimeType();
 			}
-//			EntityUtils.updateEntity(response, entity);
 		} catch (Exception ex) {
 			System.out.println(getUrl());
-			errorMsg = ex.toString();
 			Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE, null, ex);
 		} finally {
-			String st="";
-			try {
-				st=EntityUtils.toString(response.getEntity(), "UTF-8");
-			} catch (ParseException | IOException e) {
-				e.printStackTrace();
-			}
 			httpget.releaseConnection();
 		}
 	}
@@ -157,26 +158,21 @@ public class WebURL {
 		return baseHref;
 	}
 
-	public String getErrorMsg() {
-		return errorMsg;
-	}
-
 	public Set<WebURL> getParents() {
 		return parents;
 	}
 
-	public void addParent(WebURL webURL) {
-		if (webURL.getDepth() < this.depth - 1)
-			this.depth = webURL.getDepth() + 1;
-		parents.add(webURL);
+	public void addParent(WebURL parent) {
+		if (this.depth == 0) {
+			this.depth = parent.getDepth() + 1;
+		} else if (this.depth - 1 > parent.depth) {
+			this.depth = parent.getDepth() + 1;
+		}
+		parents.add(parent);
 	}
 
 	public String getMimeType() {
 		return mimeType;
-	}
-
-	public void setErrorMsg(String errorMsg) {
-		this.errorMsg = errorMsg;
 	}
 
 	public void setRedirectTo(String redirectTo) {
@@ -186,6 +182,5 @@ public class WebURL {
 	public ContentType getContentType() {
 		return contentType;
 	}
-
 
 }
