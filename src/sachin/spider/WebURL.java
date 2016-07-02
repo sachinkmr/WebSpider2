@@ -1,10 +1,8 @@
 package sachin.spider;
 
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.ObjectOutputStream;
-import java.io.OutputStream;
+import java.io.Serializable;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Objects;
@@ -12,7 +10,6 @@ import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.StatusLine;
@@ -21,30 +18,39 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.entity.ContentType;
 import org.apache.http.impl.EnglishReasonPhraseCatalog;
+import org.apache.http.util.EntityUtils;
 
 /**
  *
  * @author Sachin
  */
-public class WebURL {
+public class WebURL implements Serializable {
+	/**
+	 *
+	 */
+	private static final long serialVersionUID = 1L;
 	private final String url;
 	private int statusCode;
 	private String statusMessage;
-	private boolean proccessed;
+	private transient boolean proccessed;
 	private int resposneTime;
-	private String redirectTo = "";
-	private Header[] headers;
+	private String redirectTo;
 	private String baseHref;
 	private Set<WebURL> parents;
 	private int depth = 0;
 	private long size;
 	private String mimeType;
-	private HttpResponse response;
-	private ContentType contentType;
+	transient HttpResponse response;
 	private String host;
+	private String dom;
+	private boolean internal;
 
-	public HttpResponse getResponse() {
-		return response;
+	public boolean isInternal() {
+		return internal;
+	}
+
+	public String getDom() {
+		return dom;
 	}
 
 	public String getHost() {
@@ -54,6 +60,13 @@ public class WebURL {
 	public WebURL(String url, HttpClient httpclient, String host) {
 		this.url = url;
 		this.host = host;
+		try {
+			this.host = new URL(url).getHost().replaceAll("www.", "");
+			internal = this.host.contains(host);
+		} catch (MalformedURLException ex) {
+			Logger.getLogger(SpiderConfig.class.getName()).log(Level.SEVERE, null, ex);
+			return;
+		}
 		this.proccessed = false;
 		this.parents = new HashSet<>();
 		HttpGet httpget = new HttpGet(url);
@@ -65,23 +78,18 @@ public class WebURL {
 			StatusLine statusLine = response.getStatusLine();
 			statusCode = statusLine.getStatusCode();
 			statusMessage = EnglishReasonPhraseCatalog.INSTANCE.getReason(statusCode, Locale.ENGLISH);
-			resposneTime = ((int) (endingTime - startingTime)) / 1000;
+			resposneTime = ((int) (endingTime - startingTime));
 			baseHref = context.getTargetHost().toString();
-			headers = response.getAllHeaders();
 			HttpEntity entity = response.getEntity();
-			File file = new File(System.getProperty("user.dir") + File.separator + "data" + File.separator + host);
-			file.mkdirs();
-			ObjectOutputStream os = new ObjectOutputStream(new FileOutputStream(file));
-			entity.writeTo(os);
-			os.close();
-			if (statusCode <= 200) {
+			dom = EntityUtils.toString(entity, "UTF-8");
+			if (statusCode == 200) {
 				size = entity.getContentLength();
-				contentType = ContentType.get(entity);
-				mimeType = contentType.getMimeType();
+				mimeType = ContentType.get(entity).getMimeType();
 			}
+			EntityUtils.consumeQuietly(entity);
+
 		} catch (Exception ex) {
-			System.out.println(getUrl());
-			Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE, null, ex);
+			Logger.getLogger(WebURL.class.getName()).log(Level.SEVERE, null, ex);
 		} finally {
 			httpget.releaseConnection();
 		}
@@ -150,10 +158,6 @@ public class WebURL {
 		return redirectTo;
 	}
 
-	public Header[] getHeaders() {
-		return headers;
-	}
-
 	public String getBaseHref() {
 		return baseHref;
 	}
@@ -177,10 +181,6 @@ public class WebURL {
 
 	public void setRedirectTo(String redirectTo) {
 		this.redirectTo = redirectTo;
-	}
-
-	public ContentType getContentType() {
-		return contentType;
 	}
 
 }

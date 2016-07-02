@@ -55,9 +55,9 @@ import org.apache.http.ssl.SSLContextBuilder;
 public final class SpiderConfig {
 	public final List<Integer> hashCodes;
 	public final List<WebURL> links;
-	private int socketTimeout = 20000;
-	private int connectionTimeout = 30000;
-	private int ConnectionRequestTimeout = 30000;
+	public static int socketTimeout = 20000;
+	public static int connectionTimeout = 30000;
+	public static int ConnectionRequestTimeout = 30000;
 	private boolean followRedirects = false;
 	private boolean authenticate = false;
 	private String username = null;
@@ -65,42 +65,54 @@ public final class SpiderConfig {
 	private String userAgentString = "Mozilla/5.0 (Windows NT 6.2; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.82 Safari/537.36";
 	private String modifiedSiteName, siteName;
 	private int totalSpiders = 15;
-	public int tracker = 0;
+	public static int tracker = 1;
 	public CountDownLatch latch;
 	public ExecutorService executor;
 	private String host;
 	private HttpClient httpclient = null;
 	private PoolingHttpClientConnectionManager cm;
+	private int politeness = 200;
+
+	public int getPoliteness() {
+		return politeness;
+	}
+
+	public void setPoliteness(int politeness) {
+		this.politeness = politeness;
+	}
 
 	/**
 	 * Constructor of the SpiderConfig Class
 	 *
 	 * @param url
 	 *            String parameter for the site which is going to be crawled.
+	 * @throws Exception
 	 */
 
-	public SpiderConfig(String url) {
+	public SpiderConfig(String url) throws Exception {
 		hashCodes = new CopyOnWriteArrayList<>();
 		url = URLCanonicalizer.getCanonicalURL(url);
 		modifiedSiteName = url;
 		createHttpClient();
-		try {
-			host = new URL(url).getHost().replaceAll("www.", "");
-		} catch (MalformedURLException ex) {
-			Logger.getLogger(SpiderConfig.class.getName()).log(Level.SEVERE, null, ex);
-		}
 		links = new CopyOnWriteArrayList<WebURL>();
 		modifiedSiteName = handleRedirect(url);
 		this.setSiteName(modifiedSiteName);
-		WebURL redirectLocation = new WebURL(modifiedSiteName, httpclient,getHostName());
-		if (!hashCodes.contains(redirectLocation.hashCode())) {
-			links.add(redirectLocation);
-			hashCodes.add(redirectLocation.hashCode());
+		try {
+			host = new URL(getSiteName()).getHost().replaceAll("www.", "");
+		} catch (MalformedURLException ex) {
+			Logger.getLogger(SpiderConfig.class.getName()).log(Level.SEVERE, null, ex);
 		}
-		redirectLocation = new WebURL(url, httpclient,getHostName());
-		if (!hashCodes.contains(redirectLocation.hashCode())) {
-			links.add(redirectLocation);
-			hashCodes.add(redirectLocation.hashCode());
+		WebURL webUrl = new WebURL(modifiedSiteName, httpclient, getHostName());
+		if (webUrl.getStatusCode() != 200) {
+			throw new Exception("Site is giving " + webUrl.getStatusCode() + " status code.");
+		}
+		if (!hashCodes.contains(modifiedSiteName.hashCode())) {
+			links.add(webUrl);
+			hashCodes.add(modifiedSiteName.hashCode());
+		}
+		if (!hashCodes.contains(url.hashCode())) {
+			links.add(new WebURL(url, httpclient, getHostName()));
+			hashCodes.add(url.hashCode());
 		}
 	}
 
@@ -126,7 +138,6 @@ public final class SpiderConfig {
 			cm = new PoolingHttpClientConnectionManager(socketFactoryRegistry);
 			cm.setDefaultMaxPerRoute(this.getTotalSpiders() * 2);
 			cm.setMaxTotal(this.getTotalSpiders() * 2);
-
 			RequestConfig requestConfig = getRequestConfigWithRedirectDisabled();
 
 			if (this.isAuthenticate()) {
@@ -166,7 +177,7 @@ public final class SpiderConfig {
 	 *            time in mili seconds.
 	 */
 	public void setSocketTimeout(int socketTimeout) {
-		this.socketTimeout = socketTimeout;
+		SpiderConfig.socketTimeout = socketTimeout;
 	}
 
 	/**
@@ -185,7 +196,7 @@ public final class SpiderConfig {
 	 *            time in mili seconds.
 	 */
 	public void setConnectionTimeout(int connectionTimeout) {
-		this.connectionTimeout = connectionTimeout;
+		SpiderConfig.connectionTimeout = connectionTimeout;
 	}
 
 	/**
@@ -206,7 +217,7 @@ public final class SpiderConfig {
 	 *            time in mili seconds.
 	 */
 	public void setConnectionRequestTimeout(int ConnectionRequestTimeout) {
-		this.ConnectionRequestTimeout = ConnectionRequestTimeout;
+		SpiderConfig.ConnectionRequestTimeout = ConnectionRequestTimeout;
 	}
 
 	/**
@@ -380,6 +391,7 @@ public final class SpiderConfig {
 		} finally {
 			executor.shutdown();
 			executor.awaitTermination(5, TimeUnit.SECONDS);
+			cm.close();
 
 		}
 	}
@@ -390,7 +402,7 @@ public final class SpiderConfig {
 			RequestConfig requestConfig = RequestConfig.custom().setRedirectsEnabled(true)
 					.setCircularRedirectsAllowed(true).setRelativeRedirectsAllowed(true)
 					.setConnectionRequestTimeout(getConnectionRequestTimeout()).setSocketTimeout(getSocketTimeout())
-					.setConnectTimeout(getConnectionTimeout()).build();
+					.setCookieSpec(CookieSpecs.IGNORE_COOKIES).setConnectTimeout(getConnectionTimeout()).build();
 			httpget.setConfig(requestConfig);
 			HttpClientBuilder builder = HttpClientBuilder.create();
 			builder.setUserAgent(getUserAgentString());
@@ -440,10 +452,9 @@ public final class SpiderConfig {
 	// .setConnectionRequestTimeout(getConnectionRequestTimeout()).setSocketTimeout(getSocketTimeout())
 	// .setConnectTimeout(getConnectionTimeout()).build();
 	// }
-	@SuppressWarnings("deprecation")
+	// @SuppressWarnings("deprecation")
 	private RequestConfig getRequestConfigWithRedirectDisabled() {
-		return RequestConfig.custom().setRedirectsEnabled(false)
-				.setCookieSpec(CookieSpecs.BROWSER_COMPATIBILITY)
+		return RequestConfig.custom().setRedirectsEnabled(false).setCookieSpec(CookieSpecs.IGNORE_COOKIES)
 				.setConnectionRequestTimeout(getConnectionRequestTimeout()).setSocketTimeout(getSocketTimeout())
 				.setConnectTimeout(getConnectionTimeout()).build();
 	}

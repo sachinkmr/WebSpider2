@@ -14,7 +14,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.apache.http.Header;
+
+import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -25,7 +26,6 @@ import org.jsoup.select.Elements;
  */
 public class Page {
 
-	private Header[] headers;
 	private final Document document;
 	private boolean proccessed;
 	private final int docid;
@@ -35,7 +35,6 @@ public class Page {
 	private String statusMessage;
 	private List<String> outgoingLinks;
 	private Set<WebURL> outGoingWebURLs;
-	private WebURL webUrl;
 
 	/**
 	 * Constructor of the Page Class
@@ -45,30 +44,15 @@ public class Page {
 	 * @param document
 	 *            document of the webPage
 	 */
-	Page(WebURL webUrl, Document document) {
-		this.webUrl = webUrl;
+	Page(WebURL webUrl) {
 		this.address = webUrl.getUrl();
-		this.document = document;
 		this.docid = address.hashCode();
-	}
-
-	/**
-	 * This function is called to get the all the headers of the page.
-	 *
-	 * @return array of all the headers
-	 */
-	public Header[] getHeaders() {
-		return headers;
-	}
-
-	/**
-	 * This function is called to set headers
-	 *
-	 * @param headers
-	 *            array of headers
-	 */
-	void setHeaders(Header[] headers) {
-		this.headers = headers;
+		long startingTime = System.currentTimeMillis();
+		this.document = Jsoup.parse(webUrl.getDom(), webUrl.getBaseHref());
+		long endingTime = System.currentTimeMillis();
+		resposneTime = (int) (endingTime - startingTime);
+		statusCode = webUrl.getStatusCode();
+		statusMessage = webUrl.getStatusMessage();
 	}
 
 	/**
@@ -248,10 +232,6 @@ public class Page {
 		return metaTags;
 	}
 
-	public String getContent() {
-		return webUrl.getContentType().toString();
-	}
-
 	public String getTitle() {
 		Elements ele = document.select("title");
 		return null != ele ? ele.get(0).text() : "";
@@ -267,29 +247,19 @@ public class Page {
 	}
 
 	public int getInLinkCount() {
-		return webUrl.getParents().size();
+		return 0;
 	}
 
 	public Set<WebURL> getInLinksAsWebUrls() {
-		return webUrl.getParents();
+		return null;
 	}
 
 	public List<String> getInLinks() {
-		List<String> list = new ArrayList<>();
-		for (WebURL web : webUrl.getParents())
-			list.add(web.getUrl());
-		return list;
+		return null;
 	}
 
 	public Set<WebURL> getOutGoingWebURLs() {
 		return outGoingWebURLs;
 	}
 
-	public WebURL getWebUrl() {
-		return webUrl;
-	}
-
-//	public void addOutGoingWebUrl(WebURL webUrl){
-//
-//	}
 }

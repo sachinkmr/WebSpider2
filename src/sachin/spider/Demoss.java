@@ -18,9 +18,14 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
 import org.apache.http.HttpResponse;
 
 public class Demoss extends WebSpider {
+	/**
+	 *
+	 */
+	private static final long serialVersionUID = 1L;
 	final String site;
 	String host;
 	SpiderConfig config;
@@ -36,12 +41,11 @@ public class Demoss extends WebSpider {
 
 	@Override
 	public boolean shouldVisit(String url) {
-		// return false;
 		return (url != null && !url.contains("?") && !url.contains("#"));
 	}
 
 	@Override
-	public void handleLink(WebURL webUrl, HttpResponse response, int statusCode, String statusDescription) {
+	public void viewLink(WebURL webUrl, HttpResponse response, int statusCode, String statusDescription) {
 		System.out.println(statusCode + " : " + webUrl.getUrl());
 		System.out.println("Depth: " + webUrl.getDepth());
 		System.out.println("Mime: " + webUrl.getMimeType());
@@ -51,13 +55,22 @@ public class Demoss extends WebSpider {
 	}
 
 	void go() {
-		config = new SpiderConfig(site.trim());
+		try {
+			config = new SpiderConfig(site.trim());
+		} catch (Exception ex) {
+			Logger.getLogger(Demoss.class.getName()).log(Level.SEVERE, null, ex);
+		}
+		if (null == config)
+			return;
 		config.setConnectionRequestTimeout(120000);
 		config.setConnectionTimeout(120000);
 		config.setSocketTimeout(120000);
 		config.setTotalSpiders(30);
-		config.setUserAgentString(
-				"Mozilla/5.0 (iPhone; CPU iPhone OS 9_1 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13B143 Safari/601.1");
+		config.setPoliteness(200);
+		// config.setUserAgentString(
+		// "Mozilla/5.0 (iPhone; CPU iPhone OS 9_1 like Mac OS X)
+		// AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13B143
+		// Safari/601.1");
 		// config.setAuthenticate(true);
 		// config.setUsername("wldevuser");
 		// config.setPassword("Pass@word11");
@@ -67,11 +80,10 @@ public class Demoss extends WebSpider {
 		} catch (Exception ex) {
 			Logger.getLogger(Demoss.class.getName()).log(Level.SEVERE, null, ex);
 		}
-		// System.out.println(config.getModifiedSiteName());
 	}
 
 	public static void main(String... str) {
-		Demoss d = new Demoss("http://www.liptontea.com/");
+		Demoss d = new Demoss("http://dove.co.uk");
 		d.go();
 	}
 }

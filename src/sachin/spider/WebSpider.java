@@ -5,12 +5,11 @@
  */
 package sachin.spider;
 
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.security.KeyManagementException;
@@ -25,8 +24,6 @@ import java.util.logging.Logger;
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
 
-import org.apache.commons.io.IOUtils;
-import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
 import org.apache.http.auth.AuthScope;
@@ -52,15 +49,18 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.util.EntityUtils;
-import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
 /**
  *
  * @author JARVIS
  */
-public class WebSpider implements Runnable {
+public class WebSpider implements Runnable, Serializable {
 
+	/**
+	 *
+	 */
+	private static final long serialVersionUID = 1L;
 	private CountDownLatch latch;
 	private HttpClient httpclient = null;
 	private SpiderConfig config;
@@ -153,6 +153,23 @@ public class WebSpider implements Runnable {
 	}
 
 	/**
+	 * It can be overridden by sub-classes to perform custom logic for different
+	 * status codes. For example, 404 pages can be logged, etc.
+	 *
+	 * @param webUrl
+	 *            WebUrl containing the statusCode
+	 * @param response
+	 *            response of the url
+	 * @param statusCode
+	 *            Html Status Code number
+	 * @param statusDescription
+	 *            Html Status COde description
+	 */
+	protected void viewLink(WebURL webUrl, HttpResponse response, int statusCode, String statusDescription) {
+
+	}
+
+	/**
 	 * This function is called before processing of the page's URL It can be
 	 * overridden by subclasses for tweaking of the url before processing it.
 	 * For example, http://abc.com/def?a=123 - http://abc.com/def
@@ -200,8 +217,8 @@ public class WebSpider implements Runnable {
 	@Override
 	public void run() {
 		onStart();
+		boolean flag = true;
 		try {
-			boolean flag = true;
 			WebURL curUrl = null;
 			synchronized (this) {
 				if (flag2) {
@@ -212,13 +229,20 @@ public class WebSpider implements Runnable {
 					flag2 = false;
 				}
 			}
-
 			while (flag) {
-				curUrl = config.links.remove(0);
-				if (null != curUrl && !curUrl.isProccessed()) {
-					processURL(curUrl);
+				try {
+					if (config.links.isEmpty())
+						Thread.sleep(2000);
+					curUrl = config.links.remove(0);
+					if (null != curUrl && !curUrl.isProccessed()) {
+						processURL(curUrl);
+					}
+				} catch (Exception ex) {
+					Thread.sleep(2000);
+					// Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE,
+					// null, ex);
 				}
-				if (config.links.isEmpty()) {
+				if (SpiderConfig.tracker == config.hashCodes.size()) {
 					flag = false;
 				}
 			}
@@ -234,6 +258,15 @@ public class WebSpider implements Runnable {
 	}
 
 	private void processURL(WebURL curUrl) {
+		try {
+			Thread.sleep(config.getPoliteness());
+		} catch (Exception ex) {
+			Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE, null, ex);
+		}
+		viewLink(curUrl, curUrl.response, curUrl.getStatusCode(),
+				EnglishReasonPhraseCatalog.INSTANCE.getReason(curUrl.getStatusCode(), Locale.ENGLISH));
+		if (curUrl.getStatusCode() == 0 || !curUrl.isInternal())
+			return;
 		if (curUrl.getStatusCode() >= 300 && curUrl.getStatusCode() < 400) {
 			handleRedirectedLink(curUrl);
 		} else if (curUrl.getStatusCode() == 200 && curUrl.getMimeType().toLowerCase().contains("/htm")) {
@@ -244,21 +277,16 @@ public class WebSpider implements Runnable {
 			}
 		}
 		curUrl.setProccessed(true);
-		handleLink(curUrl, curUrl.getResponse(), curUrl.getStatusCode(),
+		handleLink(curUrl, curUrl.response, curUrl.getStatusCode(),
 				EnglishReasonPhraseCatalog.INSTANCE.getReason(curUrl.getStatusCode(), Locale.ENGLISH));
-		// EntityUtils.consumeQuietly(curUrl.getResponse().getEntity());
-		// HttpClientUtils.closeQuietly(curUrl.getResponse());
+		EntityUtils.consumeQuietly(curUrl.response.getEntity());
+		HttpClientUtils.closeQuietly(curUrl.response);
+		saveToDisk(curUrl);
+		SpiderConfig.tracker++;
 	}
 
 	private void processPage(WebURL curUrl) {
-		long startingTime = System.currentTimeMillis();
-		Document doc = Jsoup.parse(getContentAsString(curUrl), curUrl.getBaseHref());
-		long endingTime = System.currentTimeMillis();
-		Page page = new Page(curUrl, doc);
-		page.setHeaders(curUrl.getHeaders());
-		page.setResposneTime(curUrl.getResposneTime() + ((int) (endingTime - startingTime)) / 1000);
-		page.setStatusCode(curUrl.getStatusCode());
-		page.setStatusMessage(curUrl.getStatusMessage());
+		Page page = new Page(curUrl);
 		page.setProccessed(true);
 		viewPage(page);
 		List<String> list = page.getOutgoingLinks();
@@ -268,15 +296,15 @@ public class WebSpider implements Runnable {
 				linkUrl = handleUrlBeforeProcess(linkUrl);
 				WebURL weburl = new WebURL(linkUrl, httpclient, config.getHostName());
 				weburl.addParent(curUrl);
-				if (shouldVisit(linkUrl)) {
-					if (!config.hashCodes.contains(weburl.hashCode()) && !linkUrl.contains("mailto:")) {
+				if (null != weburl && shouldVisit(linkUrl)) {
+					if (!config.hashCodes.contains(linkUrl.hashCode()) && !linkUrl.contains("mailto:")) {
 						config.links.add(weburl);
-						config.hashCodes.add(weburl.hashCode());
+						config.hashCodes.add(linkUrl.hashCode());
 					}
 				}
 			}
 		}
-		visitPage(doc, curUrl);
+		visitPage(page.getDocument(), curUrl);
 	}
 
 	private void handleRedirectedLink(WebURL curUrl) {
@@ -284,7 +312,6 @@ public class WebSpider implements Runnable {
 		HttpGet httpget = new HttpGet(url);
 		RequestConfig requestConfig = getRequestConfigWithRedirectDisabled();
 		httpget.setConfig(requestConfig);
-
 		try {
 			HttpClientContext context = HttpClientContext.create();
 			HttpResponse response = httpclient.execute(httpget, context);
@@ -297,9 +324,9 @@ public class WebSpider implements Runnable {
 			redirectUrl = URLCanonicalizer.getCanonicalURL(redirectUrl);
 			WebURL weburl = new WebURL(redirectUrl, httpclient, config.getHostName());
 			weburl.addParent(curUrl);
-			if (!config.hashCodes.contains(weburl.hashCode())) {
+			if (!config.hashCodes.contains(redirectUrl.hashCode())) {
 				config.links.add(weburl);
-				config.hashCodes.add(weburl.hashCode());
+				config.hashCodes.add(redirectUrl.hashCode());
 			}
 			try {
 				if (redirectLocations != null) {
@@ -307,10 +334,10 @@ public class WebSpider implements Runnable {
 					for (URI s : redirectLocations) {
 						String urls = URLCanonicalizer.getCanonicalURL(s.toString());
 						WebURL url1 = new WebURL(urls, httpclient, config.getHostName());
-						if (!config.hashCodes.contains(url1.hashCode())) {
+						if (!config.hashCodes.contains(urls.hashCode())) {
 							url1.addParent(par);
 							config.links.add(url1);
-							config.hashCodes.add(url1.hashCode());
+							config.hashCodes.add(urls.hashCode());
 						}
 						par = url1;
 					}
@@ -332,9 +359,8 @@ public class WebSpider implements Runnable {
 
 	}
 
-	@SuppressWarnings("deprecation")
 	private RequestConfig getRequestConfigWithRedirectDisabled() {
-		return RequestConfig.custom().setCookieSpec(CookieSpecs.BROWSER_COMPATIBILITY).setRedirectsEnabled(false)
+		return RequestConfig.custom().setCookieSpec(CookieSpecs.IGNORE_COOKIES).setRedirectsEnabled(false)
 				.setConnectionRequestTimeout(config.getConnectionRequestTimeout())
 				.setSocketTimeout(config.getSocketTimeout()).setConnectTimeout(config.getConnectionTimeout()).build();
 	}
@@ -347,24 +373,21 @@ public class WebSpider implements Runnable {
 		}
 	}
 
-	private String getContentAsString(WebURL url) {
-		String str = null;
-		try {
-			ObjectInputStream st = new ObjectInputStream(new FileInputStream(
-					new File(System.getProperty("user.dir") + File.separator + "data" + File.separator + url.getHost(),
-							url.getUrl().hashCode() + ".webUrl")));
-			HttpEntity entity = (HttpEntity) st.readObject();
-			st.close();
-			str = IOUtils.toString(entity.getContent(), "UTF-8");
-			EntityUtils.consumeQuietly(entity);
-		} catch (Exception ex) {
-			Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE, null, ex);
-
-		}
-		return str;
-	}
-
 	protected void viewPage(Page page) {
 
+	}
+
+	private void saveToDisk(WebURL webUrl) {
+		try {
+			File file = new File(
+					System.getProperty("user.dir") + File.separator + "data" + File.separator + webUrl.getHost());
+			file.mkdirs();
+			File file1 = new File(file, webUrl.getUrl().hashCode() + ".webUrl");
+			ObjectOutputStream os = new ObjectOutputStream(new FileOutputStream(file1));
+			os.writeObject(webUrl);
+			os.close();
+		} catch (IOException ex) {
+			Logger.getLogger(WebSpider.class.getName()).log(Level.SEVERE, null, ex);
+		}
 	}
 }
